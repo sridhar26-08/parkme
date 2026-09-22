@@ -41,4 +41,4 @@ export function onStateChange(callback) {
  * Whether the app should use the real backend (when VITE_API_URL is set)
  * or fall back to the localStorage mock engine.
  */
-export const BACKEND_URL = import.meta.env.VITE_API_URL || null;
+export const BACKEND_URL = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL) || null;

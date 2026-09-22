@@ -4,7 +4,7 @@
  * without requiring a running Node.js / SQLite backend!
  */
 import QRCode from 'qrcode';
-import { broadcastStateChange, BACKEND_URL } from './syncChannel';
+import { broadcastStateChange, BACKEND_URL } from './syncChannel.js';
 
 const VIOLATION_FINE = 25.0;
 const RESERVATION_EXPIRY_MS = 15 * 60 * 1000; // 15 mins
