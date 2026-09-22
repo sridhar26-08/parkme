@@ -4,6 +4,7 @@
  * without requiring a running Node.js / SQLite backend!
  */
 import QRCode from 'qrcode';
+import { broadcastStateChange, BACKEND_URL } from './syncChannel';
 
 const VIOLATION_FINE = 25.0;
 const RESERVATION_EXPIRY_MS = 15 * 60 * 1000; // 15 mins
@@ -49,9 +50,11 @@ function loadState() {
   };
 }
 
-function saveState(state) {
+function saveState(state, eventType = 'UPDATE') {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    // Broadcast to other open tabs so they refresh instantly
+    broadcastStateChange(eventType, { ts: Date.now() });
   } catch {
     // ignore
   }
@@ -456,6 +459,71 @@ export async function handleMockApi(path, options = {}) {
     return { success: true, message: 'Simulated time fast-forwarded by 16 minutes. Expired reservations reclaimed.' };
   }
 
+  // POST /api/user/login
+  if (path === '/api/user/login' && method === 'POST') {
+    const body = options.body ? JSON.parse(options.body) : {};
+    const { name, ticketId } = body;
+    if (!name) return { success: false, error: 'Name is required.' };
+
+    if (ticketId) {
+      // Lookup existing ticket
+      const cleanId = ticketId.trim().toUpperCase();
+      const ticket = state.tickets[cleanId];
+      if (!ticket) return { success: false, error: `Ticket "${cleanId}" not found. Please check the ID.` };
+      if (ticket.status === 'PAID' || ticket.status === 'EXPIRED') {
+        return { success: false, error: `Ticket "${cleanId}" has already been ${ticket.status.toLowerCase()}.` };
+      }
+      return { success: true, ticketId: cleanId, ticket };
+    } else {
+      // Issue a new ticket automatically
+      const nearestSlot = getNearestSlot(state);
+      if (!nearestSlot) return { success: false, error: 'Parking Full: No available slots.' };
+
+      const newTicketId = generateTicketId();
+      nearestSlot.status = 'RESERVED';
+      nearestSlot.current_ticket_id = newTicketId;
+      nearestSlot.reserved_at = now;
+
+      state.tickets[newTicketId] = {
+        id: newTicketId,
+        entry_time: now,
+        assigned_slot_id: nearestSlot.id,
+        status: 'ACTIVE',
+        fine_amount: 0,
+        parked_time: null
+      };
+
+      let qrDataUrl = '';
+      try {
+        qrDataUrl = await QRCode.toDataURL(JSON.stringify({ type: 'TICKET', ticketId: newTicketId }), {
+          errorCorrectionLevel: 'H', margin: 2, width: 280,
+          color: { dark: '#0f172a', light: '#ffffff' }
+        });
+      } catch { /* ignore */ }
+
+      saveState(state, 'TICKET_ISSUED');
+      return {
+        success: true,
+        ticketId: newTicketId,
+        ticket: state.tickets[newTicketId],
+        slot: nearestSlot,
+        qrDataUrl
+      };
+    }
+  }
+
+  // POST /api/admin/login
+  if (path === '/api/admin/login' && method === 'POST') {
+    const body = options.body ? JSON.parse(options.body) : {};
+    const { userId, password } = body;
+    const ADMIN_USER = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_ADMIN_USER) || 'admin';
+    const ADMIN_PASS = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_ADMIN_PASS) || 'parkme123';
+    if (userId === ADMIN_USER && password === ADMIN_PASS) {
+      return { success: true, role: 'ADMIN' };
+    }
+    return { success: false, error: 'Invalid credentials.' };
+  }
+
   return { success: false, error: `Endpoint not found: ${method} ${path}` };
 }
 
@@ -475,19 +543,28 @@ export function setupMockBackendIfNeeded() {
     if (url.startsWith('/api') || url.includes('/api/')) {
       const cleanPath = url.startsWith('http') ? new URL(url).pathname : url;
 
-      // On GitHub pages, directly serve with the in-browser mock engine
+      // If a deployed backend URL is configured, proxy all API calls there (real cross-device sync)
+      if (BACKEND_URL) {
+        try {
+          const fullUrl = `${BACKEND_URL.replace(/\/$/, '')}${cleanPath}`;
+          return await originalFetch(fullUrl, init);
+        } catch {
+          console.warn(`[ParkMe] Deployed backend unreachable. Falling back to in-browser engine.`);
+        }
+      }
+
+      // On GitHub Pages, serve directly from the in-browser mock engine
       if (isGitHubPages) {
         const result = await handleMockApi(cleanPath, init);
         return new Response(JSON.stringify(result), {
-          status: result.success === false && result.error?.includes('not found') ? 404 : 200,
+          status: 200,
           headers: { 'Content-Type': 'application/json' }
         });
       }
 
-      // Locally, attempt the real backend first; if connection refused/offline, fallback seamlessly
+      // Locally, attempt the real backend first; fallback to mock if offline
       try {
         const response = await originalFetch(input, init);
-        // If server returns 404 on an API route or server is not running
         if (response.status === 404) {
           const result = await handleMockApi(cleanPath, init);
           return new Response(JSON.stringify(result), {
@@ -497,7 +574,7 @@ export function setupMockBackendIfNeeded() {
         }
         return response;
       } catch {
-        console.warn(`[ParkMe] Backend not reachable at ${cleanPath}. Falling back to in-browser engine.`);
+        console.warn(`[ParkMe] Backend not reachable. Falling back to in-browser engine.`);
         const result = await handleMockApi(cleanPath, init);
         return new Response(JSON.stringify(result), {
           status: 200,

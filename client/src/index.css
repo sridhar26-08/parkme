@@ -6,7 +6,9 @@
 
   /* Palette - Cyber Mall Dark */
   --bg-main: #090d16;
+  --bg-primary: #090d16;
   --bg-card: rgba(18, 24, 38, 0.75);
+  --card-bg: rgba(18, 24, 38, 0.85);
   --bg-card-hover: rgba(28, 36, 56, 0.85);
   --bg-surface: #0f172a;
   --bg-surface-elevated: #1e293b;

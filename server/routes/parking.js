@@ -619,4 +619,93 @@ router.post('/admin/time-warp', (req, res) => {
   }
 });
 
+// ================= AUTH ROUTES ================= //
+
+/**
+ * POST /api/admin/login
+ * Admin authentication — checks userId and password
+ */
+router.post('/admin/login', (req, res) => {
+  const { userId, password } = req.body;
+  const ADMIN_USER = process.env.ADMIN_USER || 'admin';
+  const ADMIN_PASS = process.env.ADMIN_PASS || 'parkme123';
+
+  if (!userId || !password) {
+    return res.status(400).json({ success: false, error: 'userId and password are required.' });
+  }
+
+  if (userId === ADMIN_USER && password === ADMIN_PASS) {
+    return res.json({ success: true, role: 'ADMIN', message: 'Welcome back, Admin!' });
+  }
+
+  return res.status(401).json({ success: false, error: 'Invalid User ID or Password.' });
+});
+
+/**
+ * POST /api/user/login
+ * Driver login — verifies existing ticket or issues a new one automatically.
+ * Body: { name: string, ticketId?: string }
+ */
+router.post('/user/login', async (req, res) => {
+  try {
+    cleanExpiredReservations();
+    const { name, ticketId } = req.body;
+
+    if (!name || !name.trim()) {
+      return res.status(400).json({ success: false, error: 'Name is required.' });
+    }
+
+    if (ticketId) {
+      // Look up existing ticket
+      const cleanId = ticketId.trim().toUpperCase();
+      const ticket = db.prepare('SELECT * FROM tickets WHERE id = ?').get(cleanId);
+      if (!ticket) {
+        return res.status(404).json({ success: false, error: `Ticket "${cleanId}" not found. Please check the ID.` });
+      }
+      if (ticket.status === 'PAID' || ticket.status === 'EXPIRED') {
+        return res.status(400).json({ success: false, error: `Ticket "${cleanId}" has already been ${ticket.status.toLowerCase()}.` });
+      }
+      return res.json({ success: true, ticketId: cleanId, ticket });
+    } else {
+      // Auto-issue a new ticket
+      const now = Date.now();
+      const newTicketId = generateTicketId();
+
+      const issueTx = db.transaction(() => {
+        const nearestSlot = getNearestAvailableSlot();
+        if (!nearestSlot) throw new Error('Parking Full: No available slots.');
+
+        db.prepare(`UPDATE slots SET status = 'RESERVED', current_ticket_id = ?, reserved_at = ? WHERE id = ?`)
+          .run(newTicketId, now, nearestSlot.id);
+
+        db.prepare(`INSERT INTO tickets (id, entry_time, assigned_slot_id, status, fine_amount) VALUES (?, ?, ?, 'ACTIVE', 0)`)
+          .run(newTicketId, now, nearestSlot.id);
+
+        return nearestSlot;
+      });
+
+      const slot = issueTx();
+
+      const qrPayload = JSON.stringify({ type: 'TICKET', ticketId: newTicketId });
+      const QRCode = require('qrcode');
+      const qrDataUrl = await QRCode.toDataURL(qrPayload, {
+        errorCorrectionLevel: 'H', margin: 2, width: 280,
+        color: { dark: '#0f172a', light: '#ffffff' }
+      });
+
+      return res.status(201).json({
+        success: true,
+        ticketId: newTicketId,
+        ticket: { id: newTicketId, entry_time: now, assigned_slot_id: slot.id, status: 'ACTIVE', fine_amount: 0 },
+        slot: { id: slot.id, floor: slot.floor, slot_number: slot.slot_number },
+        qrDataUrl
+      });
+    }
+  } catch (error) {
+    console.error('Error in user login:', error);
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
 module.exports = router;
+
