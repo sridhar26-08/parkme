@@ -20,14 +20,21 @@ export default function LoginScreen({ onLogin }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: name.trim(), ticketId: ticketId.trim().toUpperCase() || null })
       });
-      const data = await res.json();
-      if (data.success) {
+      let data = {};
+      try {
+        data = await res.json();
+      } catch {
+        setError('Server responded with an unexpected format. Please retry.');
+        return;
+      }
+      if (res.ok && data.success) {
         onLogin({ role: 'USER', name: name.trim(), ticketId: data.ticketId, ticket: data.ticket });
       } else {
         setError(data.error || 'Could not find that ticket. Please check the ID.');
       }
-    } catch {
-      setError('Connection error. Please try again.');
+    } catch (err) {
+      console.error('Driver login error:', err);
+      setError(`Login failed: ${err.message || 'Check your connection.'}`);
     } finally {
       setLoading(false);
     }
@@ -43,14 +50,21 @@ export default function LoginScreen({ onLogin }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: adminUser.trim(), password: adminPass })
       });
-      const data = await res.json();
-      if (data.success) {
+      let data = {};
+      try {
+        data = await res.json();
+      } catch {
+        setError('Server responded with an unexpected format. Please retry.');
+        return;
+      }
+      if (res.ok && data.success) {
         onLogin({ role: 'ADMIN', name: adminUser.trim() });
       } else {
-        setError('Invalid User ID or Password.');
+        setError(data.error || 'Invalid User ID or Password.');
       }
-    } catch {
-      setError('Connection error. Please try again.');
+    } catch (err) {
+      console.error('Admin login error:', err);
+      setError(`Login failed: ${err.message || 'Check your connection.'}`);
     } finally {
       setLoading(false);
     }

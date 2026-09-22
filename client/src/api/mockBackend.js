@@ -541,7 +541,9 @@ export function setupMockBackendIfNeeded() {
 
     // If it's an API route:
     if (url.startsWith('/api') || url.includes('/api/')) {
-      const cleanPath = url.startsWith('http') ? new URL(url).pathname : url;
+      const rawPath = url.startsWith('http') ? new URL(url).pathname : url;
+      // Strip any repository prefix like /parkme/api -> /api
+      const cleanPath = rawPath.replace(/^\/[^/]+(?=\/api)/, '');
 
       // If a deployed backend URL is configured, proxy all API calls there (real cross-device sync)
       if (BACKEND_URL) {
@@ -562,10 +564,12 @@ export function setupMockBackendIfNeeded() {
         });
       }
 
-      // Locally, attempt the real backend first; fallback to mock if offline
+      // Locally, attempt the real backend first; fallback to mock if offline or non-JSON response
       try {
         const response = await originalFetch(input, init);
-        if (response.status === 404) {
+        const contentType = response.headers.get('content-type') || '';
+        // If server returned 404, 500, 502 or non-JSON HTML proxy error
+        if (response.status === 404 || response.status >= 500 || !contentType.includes('application/json')) {
           const result = await handleMockApi(cleanPath, init);
           return new Response(JSON.stringify(result), {
             status: 200,
