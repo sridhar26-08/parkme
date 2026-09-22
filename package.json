@@ -1,0 +1,11 @@
+{
+  "name": "parkme",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "npm --prefix client run build && rm -rf docs && cp -r client/dist docs",
+    "deploy": "npm --prefix client run deploy",
+    "start": "node server/index.js",
+    "test": "node server/test-flow.js"
+  }
+}
