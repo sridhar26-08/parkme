@@ -2,8 +2,12 @@
   "name": "parkme",
   "version": "1.0.0",
   "private": true,
+  "workspaces": [
+    "client",
+    "server"
+  ],
   "scripts": {
-    "build": "npm --prefix client run build && rm -rf docs && cp -r client/dist docs",
+    "build": "npm --prefix client install && npm --prefix client run build && rm -rf dist && cp -r client/dist dist && rm -rf docs && cp -r client/dist docs",
     "deploy": "npm --prefix client run deploy",
     "start": "node server/index.js",
     "test": "node server/test-flow.js"
